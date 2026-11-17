@@ -4,7 +4,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENRGB_URL=https://openrgb.org/releases/release_0.9/openrgb_0.9_amd64_bookworm_b5f46e3.deb
+ARG OPENRGB_URL=https://codeberg.org/OpenRGB/OpenRGB/releases/download/release_0.9/openrgb_0.9_amd64_bookworm_b5f46e3.deb
 RUN curl -fsSL -o /tmp/openrgb.deb "$OPENRGB_URL" \
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/openrgb.deb \
