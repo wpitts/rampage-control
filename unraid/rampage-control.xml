@@ -1,18 +1,21 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>rampage-control</Name>
-  <Repository>local/rampage-control:latest</Repository>
-  <Registry/>
+  <Repository>ghcr.io/wpitts/rampage-control:latest</Repository>
+  <Registry>https://github.com/wpitts/rampage-control/pkgs/container/rampage-control</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>true</Privileged>
-  <Support/>
-  <Project/>
-  <Overview>Monitors temperatures and controls fan headers and Aura lighting on the ASUS ROG Rampage V Edition 10. Fan duty is written through the NCT6791D hwmon driver. Lighting is sent to OpenRGB. Fan output stays disarmed until you turn it on in the dashboard.</Overview>
+  <Support>https://github.com/wpitts/rampage-control/issues</Support>
+  <Project>https://github.com/wpitts/rampage-control</Project>
+  <Overview>Monitors temperatures and controls fan headers and Aura lighting on the ASUS ROG Rampage V Edition 10. Fan duty is written through the NCT6791D hwmon driver. Lighting is sent to OpenRGB. Fan output stays disarmed until you turn it on in the dashboard.
+
+On the host, load the sensor modules before starting the container: add nct6775, coretemp, drivetemp, i2c-dev, and i2c-i801 to /boot/config/go. The container must stay privileged with /sys and /dev mapped so it can read sensors and write PWM.</Overview>
   <Category>Tools:System</Category>
   <WebUI>http://[IP]:[PORT:8787]/</WebUI>
-  <TemplateURL/>
+  <TemplateURL>https://raw.githubusercontent.com/wpitts/rampage-control/main/unraid/rampage-control.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/wpitts/rampage-control/main/unraid/icon.png</Icon>
   <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
   <PostArgs/>
   <CPUset/>
