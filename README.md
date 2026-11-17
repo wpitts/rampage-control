@@ -25,33 +25,42 @@ If `nct6791` is missing from the dashboard after the module loads, the chipset m
 
 ## Install on Unraid
 
-1. Copy this directory to the server, for example `/mnt/user/appdata/rampage-control-src`.
-2. Build the image:
+The image is published to GitHub Container Registry at `ghcr.io/wpitts/rampage-control:latest`, so Unraid can pull it directly. Do not paste the Git URL into the Repository field; that is a clone address, not a Docker image.
+
+The first push to `main` triggers `.github/workflows/docker-publish.yml`, which builds and pushes that image. New GHCR packages start private, so a direct pull returns `denied: ... manifests/latest`. Open [the package page](https://github.com/wpitts/rampage-control/pkgs/container/rampage-control) once and set **Package settings → Danger Zone → Change visibility → Public**, or add a GHCR username and token under Unraid's Docker registry logins. After that the pull works with no credentials.
+
+1. Load the sensor modules on the host. Add the lines from `scripts/unraid-go.sh` to `/boot/config/go` so they persist across reboots, then run them once from the Unraid console:
+
+   ```bash
+   modprobe nct6775
+   modprobe coretemp
+   modprobe drivetemp
+   modprobe i2c-dev
+   modprobe i2c-i801
+   ```
+
+2. Install the template so it appears under **Add Container → Template**:
+
+   ```bash
+   mkdir -p /boot/config/plugins/dockerMan/templates-user
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-rampage-control.xml \
+     https://raw.githubusercontent.com/wpitts/rampage-control/main/unraid/rampage-control.xml
+   ```
+
+3. In the Docker tab, click **Add Container**, pick **rampage-control** from the Template list, and apply. Unraid pulls `ghcr.io/wpitts/rampage-control:latest`.
+
+   To add it by hand instead, set Repository to `ghcr.io/wpitts/rampage-control:latest`, turn on **Privileged**, map `/sys` (rw), `/dev` (rw), and `/mnt/user/appdata/rampage-control` to `/config` (rw), and publish port 8787.
+
+4. Leave the container privileged and keep the `/sys`, `/dev`, and appdata mappings. Do not expose port 8787 to the internet. Set `RAMPAGE_TOKEN` if the LAN is shared.
+5. Open `http://<tower>:8787`.
+
+### Build it yourself (optional)
 
 ```bash
-cd /mnt/user/appdata/rampage-control-src
-docker build -t local/rampage-control:latest .
+docker build -t ghcr.io/wpitts/rampage-control:latest .
 ```
 
-3. Install the template:
-
-```bash
-mkdir -p /boot/config/plugins/dockerMan/templates-user
-cp unraid/rampage-control.xml /boot/config/plugins/dockerMan/templates-user/my-rampage-control.xml
-```
-
-4. Add the module lines in `scripts/unraid-go.sh` to `/boot/config/go`, then load them once from the Unraid console:
-
-```bash
-modprobe nct6775
-modprobe coretemp
-modprobe drivetemp
-modprobe i2c-dev
-modprobe i2c-i801
-```
-
-5. In the Docker tab, add the container from the **rampage-control** template. Leave it privileged. Keep the `/sys`, `/dev`, and appdata mappings. Do not expose port 8787 to the internet. Set `RAMPAGE_TOKEN` if the LAN is shared.
-6. Open `http://<tower>:8787`.
+Pushes to `main` build and publish the image automatically through `.github/workflows/docker-publish.yml`.
 
 ## First run
 
