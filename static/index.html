@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rampage Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">ASUS ROG Rampage V Edition 10</p>
+      <h1>Rampage Control</h1>
+      <p class="sub" id="subtitle">Temperatures, NCT6791D fan headers, and Aura lighting.</p>
+    </div>
+    <div class="top-actions">
+      <span class="pill" id="chip-pill">Waiting for sensors</span>
+      <label class="arm">
+        <input type="checkbox" id="arm">
+        <span>Arm fan control</span>
+      </label>
+    </div>
+  </header>
+
+  <div id="banners"></div>
+  <div id="auth" class="panel hidden">
+    <h2>Token</h2>
+    <p>This dashboard is protected. Enter the RAMPAGE_TOKEN value.</p>
+    <form id="auth-form">
+      <input id="token" type="password" autocomplete="off" placeholder="Token">
+      <button type="submit">Unlock</button>
+    </form>
+  </div>
+
+  <main id="app" class="hidden">
+    <section>
+      <div class="section-head">
+        <h2>Temperatures</h2>
+        <span id="updated" class="muted"></span>
+      </div>
+      <div id="temps" class="cards"></div>
+    </section>
+
+    <section class="split">
+      <div>
+        <div class="section-head">
+          <h2>Fan headers</h2>
+          <button type="button" id="prepare" class="ghost">Prepare safe curves</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Header</th>
+                <th>RPM</th>
+                <th>Duty</th>
+                <th>Source</th>
+                <th>Mode</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="fans"></tbody>
+          </table>
+        </div>
+        <p id="fan-empty" class="muted hidden">No PWM headers have been discovered yet.</p>
+      </div>
+      <div class="panel">
+        <div class="section-head">
+          <h2 id="curve-title">Curve</h2>
+          <select id="preset"></select>
+        </div>
+        <canvas id="curve" width="640" height="320"></canvas>
+        <p class="hint">Drag a point. Double-click the plot to add one. Right-click a point to remove it.</p>
+        <div class="grid-3" id="fan-limits"></div>
+      </div>
+    </section>
+
+    <section class="split">
+      <div class="panel">
+        <div class="section-head">
+          <h2>Aura</h2>
+          <span id="rgb-swatch" class="swatch"></span>
+        </div>
+        <div class="grid-2">
+          <label>Mode
+            <select id="rgb-mode">
+              <option value="temperature">Follow temperature</option>
+              <option value="static">Static color</option>
+              <option value="alert">Static, flash when hot</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
+          <label>Temperature source
+            <select id="rgb-source"></select>
+          </label>
+          <label>Static color
+            <input id="rgb-static" type="color">
+          </label>
+          <label>Flash above °C
+            <input id="rgb-alert" type="number" min="40" max="105" step="1">
+          </label>
+        </div>
+        <div id="gradient"></div>
+        <label class="check"><input id="rgb-auto" type="checkbox"> Choose ASUS Aura controllers automatically</label>
+        <div id="rgb-devices"></div>
+        <p id="rgb-error" class="hint"></p>
+        <label class="check"><input id="rgb-enabled" type="checkbox"> Lighting enabled</label>
+      </div>
+      <div class="panel notes">
+        <h2>This board</h2>
+        <ul>
+          <li>Fans and the onboard thermal sensors come from the Nuvoton NCT6791D. The kernel driver is <code>nct6775</code>. CPU package temperature comes from <code>coretemp</code>.</li>
+          <li>Headers on the board are CPU_FAN, CPU_OPT, CHA_FAN1–3, H_AMP_FAN (about 3 A), W_PUMP, and the 5-pin EXT_FAN port for the fan extension card. The card adds three headers and three thermistors. Linux does not label them with those silkscreen names, so identify each one before trusting a curve.</li>
+          <li>H_AMP and W_PUMP should keep a high minimum duty. Mark the CPU header critical so it cannot be set below 20%.</li>
+          <li>The RGB header is a 12 V analog strip (G/R/B, 5050, 2 A, 2 m). It is not a 5 V addressable header. Onboard LEDs are split across the I/O cover, audio, PCIe, center, and rear edge.</li>
+          <li>Aura sits on the Super I/O SMBus. Stock Unraid does not expose that bus, so motherboard lighting appears only when OpenRGB can see the controller. USB lighting devices still work. Fan control does not depend on it.</li>
+          <li>If a curve’s sensor disappears, that header goes to the failsafe duty. Spun-down array disks drop to the header’s minimum instead, so the case can stay quiet at night.</li>
+        </ul>
+        <details>
+          <summary>Control timing</summary>
+          <div class="grid-3">
+            <label>Poll seconds
+              <input id="poll" type="number" min="0.5" max="30" step="0.5">
+            </label>
+            <label>Hysteresis °C
+              <input id="hysteresis" type="number" min="0" max="15" step="0.5">
+            </label>
+            <label>Slew %/s
+              <input id="slew" type="number" min="1" max="100" step="1">
+            </label>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>

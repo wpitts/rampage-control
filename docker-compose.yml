@@ -1,0 +1,11 @@
+services:
+  rampage-control:
+    build: .
+    image: local/rampage-control:latest
+    ports:
+      - "8787:8787"
+    environment:
+      RAMPAGE_SIMULATE: "true"
+      CONTROL_ARMED: "false"
+    volumes:
+      - ./data:/config

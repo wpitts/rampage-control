@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>rampage-control</Name>
+  <Repository>local/rampage-control:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>true</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>Monitors temperatures and controls fan headers and Aura lighting on the ASUS ROG Rampage V Edition 10. Fan duty is written through the NCT6791D hwmon driver. Lighting is sent to OpenRGB. Fan output stays disarmed until you turn it on in the dashboard.</Overview>
+  <Category>Tools:System</Category>
+  <WebUI>http://[IP]:[PORT:8787]/</WebUI>
+  <TemplateURL/>
+  <ExtraParams>--log-opt max-size=10m --log-opt max-file=3</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI" Target="8787" Default="8787" Mode="tcp" Description="Dashboard port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
+  <Config Name="App data" Target="/config" Default="/mnt/user/appdata/rampage-control" Mode="rw" Description="Saved curves and lighting settings" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/rampage-control</Config>
+  <Config Name="Host sysfs" Target="/sys" Default="/sys" Mode="rw" Description="Required. PWM and temperature files live here." Type="Path" Display="always" Required="true" Mask="false">/sys</Config>
+  <Config Name="Host devices" Target="/dev" Default="/dev" Mode="rw" Description="Required for I2C and USB lighting controllers." Type="Path" Display="always" Required="true" Mask="false">/dev</Config>
+  <Config Name="Unraid disks" Target="/unraid/disks.ini" Default="/var/local/emhttp/disks.ini" Mode="ro" Description="Array temperatures. Spun-down disks are not woken." Type="Path" Display="always" Required="false" Mask="false">/var/local/emhttp/disks.ini</Config>
+  <Config Name="Web token" Target="RAMPAGE_TOKEN" Default="" Mode="" Description="Optional. Leave empty on a trusted LAN. If set, the dashboard asks for this value." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Simulate hardware" Target="RAMPAGE_SIMULATE" Default="false" Mode="" Description="Keep false on the server. true runs a fake NCT6791D for a preview." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>
