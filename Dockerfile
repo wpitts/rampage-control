@@ -5,7 +5,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ARG OPENRGB_URL=https://codeberg.org/OpenRGB/OpenRGB/releases/download/release_0.9/openrgb_0.9_amd64_bookworm_b5f46e3.deb
-RUN curl -fsSL -o /tmp/openrgb.deb "$OPENRGB_URL" \
+# The OpenRGB .deb postinstall reloads udev rules, which has no socket inside a
+# build container and makes dpkg --configure fail. Shim udevadm to a no-op so
+# the package configures; the rules are re-read on the host at runtime anyway.
+RUN for shim in /usr/bin/udevadm /usr/sbin/udevadm; do \
+        printf '#!/bin/sh\nexit 0\n' > "$shim" && chmod +x "$shim"; \
+    done \
+    && curl -fsSL -o /tmp/openrgb.deb "$OPENRGB_URL" \
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/openrgb.deb \
     && rm /tmp/openrgb.deb \
