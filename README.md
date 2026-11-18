@@ -49,10 +49,12 @@ The first push to `main` triggers `.github/workflows/docker-publish.yml`, which 
 
 3. In the Docker tab, click **Add Container**, pick **rampage-control** from the Template list, and apply. Unraid pulls `ghcr.io/wpitts/rampage-control:latest`.
 
-   To add it by hand instead, set Repository to `ghcr.io/wpitts/rampage-control:latest`, turn on **Privileged**, map `/sys` (rw), `/dev` (rw), and `/mnt/user/appdata/rampage-control` to `/config` (rw), and publish port 8787.
+   To add it by hand instead, set Repository to `ghcr.io/wpitts/rampage-control:latest`, set Network to **Host**, turn on **Privileged**, and map `/sys` (rw), `/dev` (rw), and `/mnt/user/appdata/rampage-control` to `/config` (rw).
 
-4. Leave the container privileged and keep the `/sys`, `/dev`, and appdata mappings. Do not expose port 8787 to the internet. Set `RAMPAGE_TOKEN` if the LAN is shared.
-5. Open `http://<tower>:8787`.
+4. Leave the container privileged and keep the `/sys`, `/dev`, and appdata mappings. Set `RAMPAGE_TOKEN` if the LAN is shared.
+5. The dashboard comes up on the Unraid server's own IP at `http://<tower>:8787`. Click **Web UI** on the container, or check the container log, which prints the exact `http://<ip>:<port>/` on startup.
+
+The template uses host networking, so the dashboard binds straight to the Unraid IP with no port mapping to manage. Port 8787 must be free on the host. To move it, change both the **Web UI port** and the **Dashboard bind port** (`RAMPAGE_PORT`) to the same value. If you prefer a mapped bridge port or a dedicated container IP, switch Network back to **Bridge** or **Custom** and publish 8787.
 
 ### Build it yourself (optional)
 
