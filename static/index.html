@@ -78,9 +78,11 @@
     <section class="split">
       <div class="panel">
         <div class="section-head">
-          <h2>Aura</h2>
+          <h2>Lighting</h2>
           <span id="rgb-swatch" class="swatch"></span>
         </div>
+        <h3 class="sub">Default profile</h3>
+        <p class="hint">Zones set to <em>Inherit default</em> follow this. The temperature gradient below is shared by every temperature zone.</p>
         <div class="grid-2">
           <label>Mode
             <select id="rgb-mode">
@@ -101,8 +103,9 @@
           </label>
         </div>
         <div id="gradient"></div>
-        <label class="check"><input id="rgb-auto" type="checkbox"> Choose ASUS Aura controllers automatically</label>
-        <div id="rgb-devices"></div>
+        <h3 class="sub">Zones</h3>
+        <p class="hint">G.Skill memory, motherboard Aura zones, and RGB strips each get their own mode, source, and color. New controllers appear here automatically.</p>
+        <div id="rgb-zones"></div>
         <p id="rgb-error" class="hint"></p>
         <label class="check"><input id="rgb-enabled" type="checkbox"> Lighting enabled</label>
       </div>
@@ -133,6 +136,6 @@
       </div>
     </section>
   </main>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

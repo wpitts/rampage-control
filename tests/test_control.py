@@ -188,6 +188,76 @@ class RgbProtocolTests(unittest.TestCase):
         self.assertEqual(device.zones[0].leds, 1)
 
 
+class ZoneLightingTests(unittest.TestCase):
+    def _devices(self):
+        from app.rgb import DeviceInfo, ZoneInfo
+
+        return [
+            DeviceInfo(0, "ASUS Aura", "ASUS", "mb", 2, [ZoneInfo("I/O", 1), ZoneInfo("PCIe", 1)]),
+            DeviceInfo(1, "G.Skill Trident Z RGB", "G.Skill", "A1", 5, [ZoneInfo("Module", 5)]),
+            DeviceInfo(2, "G.Skill Trident Z RGB", "G.Skill", "B1", 5, [ZoneInfo("Module", 5)]),
+        ]
+
+    def test_enumerate_disambiguates_duplicate_devices(self):
+        from app.engine import enumerate_fixtures
+
+        fixtures = enumerate_fixtures(self._devices())
+        ids = [fixture.id for fixture in fixtures]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn("G.Skill Trident Z RGB@0/z0:Module", ids)
+        self.assertIn("G.Skill Trident Z RGB@1/z0:Module", ids)
+        self.assertEqual(fixtures[0].id, "ASUS Aura@0/z0:I/O")
+
+    def test_zone_override_beats_global_default(self):
+        from app.config import LightZone, Settings
+
+        settings = Settings()
+        settings.rgb.mode = "static"
+        settings.rgb.static_color = [10, 20, 30]
+        lookup = {"a:temp1": (50.0, "ok")}
+
+        from app.engine import Engine
+
+        engine = Engine.__new__(Engine)  # no __init__; _resolve_zone only reads settings
+        # inherit default
+        enabled, color = engine._resolve_zone(settings, LightZone(id="x", device="d", mode="default"), lookup)
+        self.assertTrue(enabled)
+        self.assertEqual(color, (10, 20, 30))
+        # zone static override
+        zone = LightZone(id="y", device="d", mode="static", static_color=[1, 2, 3])
+        enabled, color = engine._resolve_zone(settings, zone, lookup)
+        self.assertEqual(color, (1, 2, 3))
+        # disabled zone
+        off = LightZone(id="z", device="d", enabled=False)
+        enabled, _ = engine._resolve_zone(settings, off, lookup)
+        self.assertFalse(enabled)
+
+    def test_update_zone_packet(self):
+        from app.rgb import MAGIC, UPDATE_ZONE_LEDS, DeviceInfo, OpenRGBClient, ZoneInfo
+
+        sent: list[bytes] = []
+
+        class FakeSocket:
+            def sendall(self, data):
+                sent.append(data)
+
+        client = OpenRGBClient("127.0.0.1", 6742)
+        client._socket = FakeSocket()
+        client.devices = [DeviceInfo(0, "d", "v", "", 3, [ZoneInfo("Strip", 3)])]
+        client.update_zone(0, 0, 3, (255, 128, 64))
+
+        # last packet is UPDATE_ZONE_LEDS
+        packet = sent[-1]
+        magic, device_id, packet_id, size = struct.unpack("<4sIII", packet[:16])
+        self.assertEqual(magic, MAGIC)
+        self.assertEqual(packet_id, UPDATE_ZONE_LEDS)
+        payload = packet[16:]
+        data_size, zone_index, count = struct.unpack("<IIH", payload[:10])
+        self.assertEqual(zone_index, 0)
+        self.assertEqual(count, 3)
+        self.assertEqual(payload[10:14], struct.pack("<BBBB", 255, 128, 64, 0))
+
+
 class EngineTests(unittest.TestCase):
     def test_curve_writes_only_when_armed(self):
         from app.engine import Engine

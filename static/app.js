@@ -458,13 +458,116 @@ function bindCurve() {
   });
 }
 
+function zoneSourceOptions(select, current) {
+  select.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "Default source";
+  select.appendChild(empty);
+  tempSensors().forEach((sensor) => {
+    const option = document.createElement("option");
+    option.value = sensor.id;
+    option.textContent = sensorName(sensor.id);
+    select.appendChild(option);
+  });
+  select.value = [...select.options].some((option) => option.value === current) ? current : "";
+}
+
+function renderZoneRow(fx, cfg) {
+  const row = document.createElement("div");
+  row.className = "zone-row";
+  const head = document.createElement("div");
+  head.className = "zone-head";
+  const enable = document.createElement("input");
+  enable.type = "checkbox";
+  enable.title = "Control this zone";
+  enable.checked = cfg ? cfg.enabled : true;
+  const swatch = document.createElement("span");
+  swatch.className = "swatch sm";
+  const live = fx.color || [40, 40, 40];
+  swatch.style.background = enable.checked ? `rgb(${live.join(",")})` : "transparent";
+  const name = document.createElement("span");
+  name.className = "zone-name";
+  name.textContent = fx.zone || "All LEDs";
+  const meta = document.createElement("span");
+  meta.className = "zone-meta";
+  meta.textContent = `${fx.leds} LED${fx.leds === 1 ? "" : "s"}`;
+  head.append(enable, swatch, name, meta);
+  row.appendChild(head);
+  if (!cfg) return row;
+  enable.addEventListener("change", () => {
+    cfg.enabled = enable.checked;
+    scheduleSave();
+    renderRgb();
+  });
+
+  const controls = document.createElement("div");
+  controls.className = "zone-controls grid-2";
+  const mode = document.createElement("select");
+  [
+    ["default", "Inherit default"],
+    ["temperature", "Follow temperature"],
+    ["static", "Static color"],
+    ["alert", "Static, flash when hot"],
+    ["off", "Off"],
+  ].forEach(([value, text]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    mode.appendChild(option);
+  });
+  mode.value = cfg.mode;
+  const source = document.createElement("select");
+  zoneSourceOptions(source, cfg.temp_source);
+  const color = document.createElement("input");
+  color.type = "color";
+  color.value = hex(cfg.static_color);
+  const alert = document.createElement("input");
+  alert.type = "number";
+  alert.min = 40;
+  alert.max = 105;
+  alert.step = 1;
+  alert.value = cfg.alert_temp;
+
+  mode.addEventListener("change", () => {
+    cfg.mode = mode.value;
+    scheduleSave();
+    renderRgb();
+  });
+  source.addEventListener("change", () => {
+    cfg.temp_source = source.value;
+    scheduleSave();
+  });
+  color.addEventListener("input", () => {
+    cfg.static_color = parseHex(color.value);
+    scheduleSave();
+  });
+  alert.addEventListener("change", () => {
+    cfg.alert_temp = Number(alert.value);
+    scheduleSave();
+  });
+
+  const wrap = (text, el) => {
+    const label = document.createElement("label");
+    label.append(document.createTextNode(text), el);
+    return label;
+  };
+  controls.append(wrap("Mode", mode), wrap("Source", source), wrap("Color", color), wrap("Flash °C", alert));
+  const inherit = cfg.mode === "default";
+  source.disabled = inherit || cfg.mode === "static" || cfg.mode === "off";
+  color.disabled = inherit || cfg.mode === "temperature" || cfg.mode === "off";
+  alert.disabled = inherit || !(cfg.mode === "temperature" || cfg.mode === "alert");
+  if (!enable.checked) controls.classList.add("disabled");
+  row.appendChild(controls);
+  return row;
+}
+
 function renderRgb() {
   const rgb = state.config.rgb;
   $("rgb-mode").value = rgb.mode;
   $("rgb-enabled").checked = rgb.enabled;
   $("rgb-alert").value = rgb.alert_temp;
   $("rgb-static").value = hex(rgb.static_color);
-  $("rgb-auto").checked = rgb.device_indexes == null;
   fillSources($("rgb-source"), rgb.temp_source);
   const gradient = $("gradient");
   gradient.replaceChildren();
@@ -489,26 +592,32 @@ function renderRgb() {
     gradient.appendChild(row);
     void index;
   });
-  const devices = $("rgb-devices");
-  devices.replaceChildren();
-  (state.status?.rgb?.devices || []).forEach((device) => {
-    const row = document.createElement("label");
-    row.className = "device";
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.checked = rgb.device_indexes == null ? true : rgb.device_indexes.includes(device.index);
-    box.disabled = rgb.device_indexes == null;
-    box.addEventListener("change", () => {
-      const chosen = new Set(rgb.device_indexes || []);
-      if (box.checked) chosen.add(device.index);
-      else chosen.delete(device.index);
-      rgb.device_indexes = [...chosen];
-      scheduleSave();
-    });
-    const zones = device.zones?.length ? ` — ${device.zones.join(", ")}` : "";
-    row.append(box, document.createTextNode(`${device.name}${zones}`));
-    devices.appendChild(row);
+
+  const zonesById = {};
+  (rgb.zones || []).forEach((zone) => {
+    zonesById[zone.id] = zone;
   });
+  const container = $("rgb-zones");
+  container.replaceChildren();
+  const devices = state.status?.rgb?.devices || [];
+  if (!devices.length) {
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = "No lighting controllers detected yet.";
+    container.appendChild(note);
+  }
+  devices.forEach((device) => {
+    const group = document.createElement("div");
+    group.className = "zone-group";
+    const heading = document.createElement("h4");
+    heading.textContent = device.name;
+    group.appendChild(heading);
+    (device.fixtures || []).forEach((fx) => {
+      group.appendChild(renderZoneRow(fx, zonesById[fx.id]));
+    });
+    container.appendChild(group);
+  });
+
   const color = state.status?.rgb?.color || [0, 0, 0];
   $("rgb-swatch").style.background = `rgb(${color.join(",")})`;
   $("rgb-error").textContent = state.status?.rgb?.error || (state.status?.rgb?.connected ? "Lighting link is up." : "");
@@ -601,7 +710,7 @@ function bindSettings() {
     scheduleSave();
     renderCurve();
   });
-  ["rgb-mode", "rgb-source", "rgb-static", "rgb-alert", "rgb-auto", "rgb-enabled", "poll", "hysteresis", "slew"].forEach((id) => {
+  ["rgb-mode", "rgb-source", "rgb-static", "rgb-alert", "rgb-enabled", "poll", "hysteresis", "slew"].forEach((id) => {
     $(id).addEventListener("change", () => {
       const rgb = state.config.rgb;
       rgb.mode = $("rgb-mode").value;
@@ -609,7 +718,6 @@ function bindSettings() {
       rgb.static_color = parseHex($("rgb-static").value);
       rgb.alert_temp = Number($("rgb-alert").value);
       rgb.enabled = $("rgb-enabled").checked;
-      rgb.device_indexes = $("rgb-auto").checked ? null : (rgb.device_indexes || []);
       state.config.poll_seconds = Number($("poll").value);
       state.config.hysteresis_c = Number($("hysteresis").value);
       state.config.slew_percent_per_sec = Number($("slew").value);

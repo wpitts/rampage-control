@@ -19,6 +19,7 @@ REQUEST_CONTROLLER_DATA = 1
 REQUEST_PROTOCOL_VERSION = 40
 SET_CLIENT_NAME = 50
 UPDATE_LEDS = 1050
+UPDATE_ZONE_LEDS = 1051
 SET_CUSTOM_MODE = 1100
 
 
@@ -164,6 +165,11 @@ def _packet(device_id: int, packet_id: int, payload: bytes = b"") -> bytes:
     return header + payload
 
 
+def _pack_color(color: tuple[int, int, int]) -> bytes:
+    red, green, blue = color
+    return struct.pack("<BBBB", red & 255, green & 255, blue & 255, 0)
+
+
 class OpenRGBClient:
     def __init__(self, host: str, port: int, timeout: float = 1.5):
         self.host = host
@@ -195,8 +201,7 @@ class OpenRGBClient:
             raise ProtocolError("protocol version response was empty")
         server = struct.unpack("<I", payload[:4])[0]
         self.protocol = min(CLIENT_PROTOCOL, server)
-        name = b"rampage-control\x00"
-        self._send(0, SET_CLIENT_NAME, name)
+        self._send(0, SET_CLIENT_NAME, b"rampage-control\x00")
         self.refresh()
 
     def refresh(self) -> None:
@@ -218,22 +223,33 @@ class OpenRGBClient:
         self.devices = found
         self._custom.clear()
 
+    def _enter_custom(self, index: int) -> None:
+        if index not in self._custom:
+            self._send(index, SET_CUSTOM_MODE, b"")
+            self._custom.add(index)
+
+    def update_device(self, index: int, color: tuple[int, int, int]) -> None:
+        device = next((item for item in self.devices if item.index == index), None)
+        if device is None or device.led_count <= 0:
+            return
+        count = min(device.led_count, 4096)
+        self._enter_custom(index)
+        colors = _pack_color(color) * count
+        block = struct.pack("<IH", 2 + len(colors), count) + colors
+        self._send(index, UPDATE_LEDS, block)
+
+    def update_zone(self, index: int, zone_index: int, led_count: int, color: tuple[int, int, int]) -> None:
+        if led_count <= 0:
+            return
+        count = min(led_count, 4096)
+        self._enter_custom(index)
+        colors = _pack_color(color) * count
+        block = struct.pack("<IIH", 4 + 2 + len(colors), zone_index, count) + colors
+        self._send(index, UPDATE_ZONE_LEDS, block)
+
     def set_color(self, indexes: list[int], color: tuple[int, int, int]) -> None:
-        red, green, blue = color
-        packed = struct.pack("<BBBB", red & 255, green & 255, blue & 255, 0)
         for index in indexes:
-            device = next((item for item in self.devices if item.index == index), None)
-            if device is None or device.led_count <= 0:
-                continue
-            count = min(device.led_count, 1024)
-            if index not in self._custom:
-                self._send(index, SET_CUSTOM_MODE, b"")
-                self._custom.add(index)
-            colors = packed * count
-            block = struct.pack("<IH", 6 + len(colors), count) + colors
-            # data_size covers the whole block.
-            block = struct.pack("<IH", len(block), count) + colors
-            self._send(index, UPDATE_LEDS, block)
+            self.update_device(index, color)
 
     def _send(self, device_id: int, packet_id: int, payload: bytes) -> None:
         if self._socket is None:

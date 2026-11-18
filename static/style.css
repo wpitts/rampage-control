@@ -127,6 +127,17 @@ label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
 #curve { width: 100%; height: auto; background: #101318; border-radius: 12px; touch-action: none; }
 .device { padding: 6px 0; color: var(--text); }
 
+h3.sub { margin: 18px 0 4px; font-size: 0.95rem; color: var(--text); }
+.swatch.sm { width: 16px; height: 16px; border-radius: 4px; flex: 0 0 auto; }
+.zone-group { margin: 10px 0 14px; }
+.zone-group h4 { margin: 0 0 6px; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.zone-row { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: #11151b; }
+.zone-head { display: flex; align-items: center; gap: 8px; }
+.zone-name { color: var(--text); font-weight: 600; }
+.zone-meta { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+.zone-controls { margin-top: 8px; }
+.zone-controls.disabled { opacity: 0.45; }
+
 @media (max-width: 900px) {
   .split, .grid-2, .grid-3, .top { display: grid; grid-template-columns: 1fr; }
   h1 { font-size: 32px; }

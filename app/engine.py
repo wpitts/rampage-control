@@ -11,15 +11,70 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from app.config import FanConfig, Settings, load_settings, save_settings
+from app.config import FanConfig, LightZone, Settings, load_settings, save_settings
 from app.curves import Decision, decide_pwm, mix_color
 from app.disks import DiskTemp, load_disks
 from app.hwmon import Hardware, PwmChannel, apply_pwm, read_int, read_milli, scan
-from app.rgb import OpenRGBClient
+from app.rgb import DeviceInfo, OpenRGBClient, ZoneInfo
 
 log = logging.getLogger("rampage")
 
-AUTO_RGB_HINTS = ("asus", "aura", "rampage", "ene")
+MAX_LIGHT_ZONES = 128
+
+
+@dataclass
+class Fixture:
+    id: str
+    device_index: int
+    device_name: str
+    zone_index: int | None
+    zone_name: str
+    leds: int
+    label: str
+
+
+def _fixture_id(name: str, occurrence: int, zone_index: int | None, zone_name: str) -> str:
+    if zone_index is None:
+        return f"{name}@{occurrence}"
+    return f"{name}@{occurrence}/z{zone_index}:{zone_name}"
+
+
+def enumerate_fixtures(devices) -> list[Fixture]:
+    """Flatten controllers into per-zone (or whole-device) targets with stable ids."""
+    fixtures: list[Fixture] = []
+    seen: dict[str, int] = {}
+    for device in devices:
+        occurrence = seen.get(device.name, 0)
+        seen[device.name] = occurrence + 1
+        suffix = "" if occurrence == 0 else f" #{occurrence + 1}"
+        zones = list(getattr(device, "zones", []) or [])
+        if zones:
+            for zone_index, zone in enumerate(zones):
+                zone_label = zone.name or f"zone {zone_index}"
+                fixtures.append(
+                    Fixture(
+                        id=_fixture_id(device.name, occurrence, zone_index, zone.name),
+                        device_index=device.index,
+                        device_name=device.name,
+                        zone_index=zone_index,
+                        zone_name=zone.name,
+                        leds=zone.leds,
+                        label=f"{device.name}{suffix} — {zone_label}",
+                    )
+                )
+        else:
+            fixtures.append(
+                Fixture(
+                    id=_fixture_id(device.name, occurrence, None, ""),
+                    device_index=device.index,
+                    device_name=device.name,
+                    zone_index=None,
+                    zone_name="",
+                    leds=device.led_count,
+                    label=f"{device.name}{suffix}",
+                )
+            )
+    return fixtures
 
 
 @dataclass
@@ -71,18 +126,48 @@ class Engine:
         self._history: deque[dict] = deque(maxlen=900)
         self._rgb_client: OpenRGBClient | None = None
         self._rgb_next = 0.0
-        self._last_color: tuple[int, int, int] | None = None
+        self._zone_colors: dict[str, tuple[int, int, int]] = {}
         self._openrgb: subprocess.Popen | None = None
         self._openrgb_log: deque[str] = deque(maxlen=30)
         self._sim_devices = [
-            {
-                "index": 0,
-                "name": "Simulated Aura (no hardware)",
-                "vendor": "preview",
-                "description": "Stand-in for the Rampage V Aura zones",
-                "leds": 6,
-                "zones": ["IO shield", "Audio", "PCIe", "Center ROG", "Rear edge", "RGB header"],
-            }
+            DeviceInfo(
+                index=0,
+                name="ASUS Aura Core (Rampage V E10)",
+                vendor="ASUS",
+                description="Motherboard Aura zones on the Super I/O SMBus",
+                led_count=5,
+                zones=[
+                    ZoneInfo("I/O shield", 1),
+                    ZoneInfo("Audio", 1),
+                    ZoneInfo("PCIe", 1),
+                    ZoneInfo("Center ROG", 1),
+                    ZoneInfo("RGB header", 1),
+                ],
+            ),
+            DeviceInfo(
+                index=1,
+                name="G.Skill Trident Z RGB",
+                vendor="G.Skill",
+                description="DIMM slot A1",
+                led_count=5,
+                zones=[ZoneInfo("Module", 5)],
+            ),
+            DeviceInfo(
+                index=2,
+                name="G.Skill Trident Z RGB",
+                vendor="G.Skill",
+                description="DIMM slot B1",
+                led_count=5,
+                zones=[ZoneInfo("Module", 5)],
+            ),
+            DeviceInfo(
+                index=3,
+                name="Addressable strip",
+                vendor="generic",
+                description="12V RGB header / 5V ARGB strip",
+                led_count=30,
+                zones=[ZoneInfo("Strip", 30)],
+            ),
         ]
 
     def start(self) -> None:
@@ -90,7 +175,6 @@ class Engine:
             from app.simulate import start as start_sim
 
             start_sim()
-            self.rgb.devices = self._sim_devices
             self.rgb.connected = True
         self._thread = threading.Thread(target=self._loop, name="rampage-engine", daemon=True)
         self._thread.start()
@@ -344,17 +428,99 @@ class Engine:
             )
         return views
 
+    def _sync_zones(self, settings: Settings, fixtures: list[Fixture]) -> bool:
+        """Add a LightZone entry for any newly discovered fixture. Returns True if changed."""
+        known = {zone.id for zone in settings.rgb.zones}
+        changed = False
+        for fixture in fixtures:
+            if fixture.id in known:
+                continue
+            if len(settings.rgb.zones) >= MAX_LIGHT_ZONES:
+                break
+            settings.rgb.zones.append(
+                LightZone(
+                    id=fixture.id,
+                    device=fixture.device_name,
+                    zone=fixture.zone_name,
+                    label=fixture.label,
+                    mode="default",
+                )
+            )
+            known.add(fixture.id)
+            changed = True
+        return changed
+
+    def _resolve_zone(self, settings: Settings, zone: LightZone | None, lookup: dict):
+        """Return (enabled, color) for a fixture using zone overrides over the global default."""
+        rgb = settings.rgb
+        if zone is not None and not zone.enabled:
+            return False, (0, 0, 0)
+        mode = rgb.mode if (zone is None or zone.mode == "default") else zone.mode
+        if zone is None or zone.mode == "default":
+            temp_source = rgb.temp_source
+            static_color = tuple(rgb.static_color)
+            alert_temp = rgb.alert_temp
+        else:
+            temp_source = zone.temp_source or rgb.temp_source
+            static_color = tuple(zone.static_color)
+            alert_temp = zone.alert_temp
+        color = _compute_color(mode, temp_source, rgb.gradient, static_color, alert_temp, lookup)
+        return True, color
+
+    def _fixture_payload(self, fixtures: list[Fixture], zones_by_id: dict, colors: dict) -> list[dict]:
+        devices: dict[int, dict] = {}
+        for fixture in fixtures:
+            device = devices.setdefault(
+                fixture.device_index,
+                {"index": fixture.device_index, "name": fixture.device_name, "fixtures": []},
+            )
+            zone = zones_by_id.get(fixture.id)
+            color = colors.get(fixture.id)
+            device["fixtures"].append(
+                {
+                    "id": fixture.id,
+                    "label": fixture.label,
+                    "zone_index": fixture.zone_index,
+                    "zone": fixture.zone_name,
+                    "leds": fixture.leds,
+                    "enabled": True if zone is None else zone.enabled,
+                    "color": list(color) if color is not None else None,
+                }
+            )
+        return list(devices.values())
+
+    def _apply_fixtures(self, client: OpenRGBClient, fixtures: list[Fixture], settings: Settings, lookup: dict):
+        zones_by_id = {zone.id: zone for zone in settings.rgb.zones}
+        colors: dict[str, tuple[int, int, int]] = {}
+        for fixture in fixtures:
+            enabled, color = self._resolve_zone(settings, zones_by_id.get(fixture.id), lookup)
+            if not enabled:
+                continue
+            colors[fixture.id] = color
+            if client is not None and color != self._zone_colors.get(fixture.id):
+                if fixture.zone_index is None:
+                    client.update_device(fixture.device_index, color)
+                else:
+                    client.update_zone(fixture.device_index, fixture.zone_index, fixture.leds, color)
+            self._zone_colors[fixture.id] = color
+        return zones_by_id, colors
+
     def _lighting(self, settings: Settings, lookup: dict) -> RgbView:
         state = RgbView(simulated=self.simulated, log=list(self._openrgb_log))
         if not settings.rgb.enabled:
             state.error = "Lighting control is off."
             return state
         if self.simulated:
-            color = self._color_for(settings, lookup)
+            fixtures = enumerate_fixtures(self._sim_devices)
+            if self._sync_zones(settings, fixtures):
+                with self._lock:
+                    self.settings.rgb.zones = settings.rgb.zones
+                    save_settings(self.settings)
+            zones_by_id, colors = self._apply_fixtures(None, fixtures, settings, lookup)
             state.connected = True
             state.error = ""
-            state.color = list(color)
-            state.devices = self._sim_devices
+            state.devices = self._fixture_payload(fixtures, zones_by_id, colors)
+            state.color = next((list(c) for c in colors.values()), [0, 0, 0])
             return state
         self._ensure_openrgb(settings)
         state.log = list(self._openrgb_log)
@@ -368,7 +534,7 @@ class Engine:
                 client = OpenRGBClient(settings.rgb.host, settings.rgb.port)
                 client.connect()
                 self._rgb_client = client
-                self._last_color = None
+                self._zone_colors.clear()
             except OSError as exc:
                 state.error = f"OpenRGB is not reachable at {settings.rgb.host}:{settings.rgb.port}. {exc}"
                 return state
@@ -376,73 +542,25 @@ class Engine:
         if client is None:
             return state
         try:
-            color = self._color_for(settings, lookup)
-            if color != self._last_color:
-                indexes = self._rgb_targets(settings, client)
-                if indexes:
-                    client.set_color(indexes, color)
-                self._last_color = color
+            fixtures = enumerate_fixtures(client.devices)
+            if self._sync_zones(settings, fixtures):
+                with self._lock:
+                    self.settings.rgb.zones = settings.rgb.zones
+                    save_settings(self.settings)
+            zones_by_id, colors = self._apply_fixtures(client, fixtures, settings, lookup)
             state.connected = True
-            state.color = list(color)
-            state.devices = [
-                {
-                    "index": device.index,
-                    "name": device.name,
-                    "vendor": device.vendor,
-                    "description": device.description,
-                    "leds": device.led_count,
-                    "zones": [zone.name for zone in device.zones],
-                }
-                for device in client.devices
-            ]
-            if not state.devices:
+            state.devices = self._fixture_payload(fixtures, zones_by_id, colors)
+            state.color = next((list(c) for c in colors.values()), [0, 0, 0])
+            if not client.devices:
                 state.error = "OpenRGB is running and has not found a lighting controller."
-            elif not self._rgb_targets(settings, client):
-                state.error = "No Aura device is selected. Choose a controller below."
         except Exception as exc:
             log.warning("rgb update failed: %s", exc)
             state.connected = False
             state.error = str(exc)
             client.close()
             self._rgb_client = None
-            self._last_color = None
+            self._zone_colors.clear()
         return state
-
-    def _color_for(self, settings: Settings, lookup: dict) -> tuple[int, int, int]:
-        rgb = settings.rgb
-        if rgb.mode == "off":
-            return (0, 0, 0)
-        temp, state = _source(lookup, rgb.temp_source or _preferred_source(lookup))
-        if rgb.mode == "static":
-            color = tuple(rgb.static_color)
-        elif rgb.mode == "alert":
-            hot = state == "ok" and temp is not None and temp >= rgb.alert_temp
-            color = (255, 0, 40) if hot else tuple(rgb.static_color)
-        else:
-            if state == "ok" and temp is not None:
-                stops = [(stop.temp, tuple(stop.color)) for stop in rgb.gradient]
-                color = mix_color(stops, temp)
-            else:
-                color = tuple(rgb.static_color)
-        hot = state == "ok" and temp is not None and temp >= rgb.alert_temp
-        if hot and int(time.time()) % 2 == 0 and rgb.mode in {"temperature", "alert"}:
-            return (255, 255, 255)
-        return color  # type: ignore[return-value]
-
-    def _rgb_targets(self, settings: Settings, client: OpenRGBClient) -> list[int]:
-        chosen = settings.rgb.device_indexes
-        if chosen is not None:
-            return list(chosen)
-        matched = [
-            device.index
-            for device in client.devices
-            if any(hint in f"{device.vendor} {device.name} {device.description}".lower() for hint in AUTO_RGB_HINTS)
-        ]
-        if matched:
-            return matched
-        if len(client.devices) == 1:
-            return [client.devices[0].index]
-        return []
 
     def _ensure_openrgb(self, settings: Settings) -> None:
         if not settings.rgb.launch_server or settings.rgb.host not in {"127.0.0.1", "localhost"}:
@@ -496,6 +614,27 @@ class Engine:
         if any(sensor.state == "error" and sensor.kind == "temp" for sensor in sensors):
             warnings.append("At least one temperature file could not be read.")
         return warnings
+
+
+def _compute_color(mode, temp_source, gradient, static_color, alert_temp, lookup) -> tuple[int, int, int]:
+    if mode == "off":
+        return (0, 0, 0)
+    temp, state = _source(lookup, temp_source or _preferred_source(lookup))
+    if mode == "static":
+        color = tuple(static_color)
+    elif mode == "alert":
+        hot = state == "ok" and temp is not None and temp >= alert_temp
+        color = (255, 0, 40) if hot else tuple(static_color)
+    else:
+        if state == "ok" and temp is not None:
+            stops = [(stop.temp, tuple(stop.color)) for stop in gradient]
+            color = mix_color(stops, temp)
+        else:
+            color = tuple(static_color)
+    hot = state == "ok" and temp is not None and temp >= alert_temp
+    if hot and int(time.time()) % 2 == 0 and mode in {"temperature", "alert"}:
+        return (255, 255, 255)
+    return color  # type: ignore[return-value]
 
 
 def _preferred_source(lookup: dict) -> str:
